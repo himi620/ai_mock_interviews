@@ -97,3 +97,64 @@ interface InterviewFormProps {
 interface TechIconProps {
   techStack: string[];
 }
+
+// Recruitment-related interfaces
+interface CandidateInfo {
+  candidateName: string;
+  email: string | null;
+  topSkills: string[];
+  summary: string;
+  matchScore: number;
+  recommended: "yes" | "no";
+}
+
+interface RecruitRun {
+  id?: string;
+  jobDescription: string;
+  createdAt: string;
+  total: number;
+  shortlisted: Array<{
+    id: string;
+    candidateName: string;
+    email: string;
+    matchScore: number;
+  }>;
+  runStatus: "processing" | "completed" | "failed";
+}
+
+interface RecruitCandidate {
+  id?: string;
+  runId: string;
+  fileName: string;
+  textSnippet: string;
+  ai: CandidateInfo;
+  email: string | null;
+  createdAt: string;
+}
+
+interface RecruitInterview {
+  id?: string;
+  candidateId: string;
+  candidateEmail: string;
+  runId: string;
+  scheduledAt: string;
+  calendlyEventUri?: string;
+  vapiSessionId?: string;
+  transcript?: Array<{ role: string; content: string }>;
+  recordingUrl?: string;
+  report?: {
+    overallScore: number;
+    strengths: string[];
+    weaknesses: string[];
+    recommendedNextStep: "onsite" | "hr" | "reject";
+    detailedNotes: string;
+  };
+  status: "scheduled" | "in_progress" | "completed" | "failed";
+  createdAt: string;
+}
+
+interface ProcessResumeResponse {
+  success: boolean;
+  runId?: string;
+  error?: string;
+}
