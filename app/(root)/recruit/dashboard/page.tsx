@@ -40,10 +40,40 @@ export default function RecruitDashboardPage() {
 
   const fetchDashboardData = async () => {
     try {
-      // In a real app, you'd fetch this from your API
-      // For now, we'll show a placeholder
-      setRuns([]);
-      setInterviews([]);
+      // Check localStorage first for demo mode
+      const storedRuns = localStorage.getItem('recruitRuns');
+      const storedInterviews = localStorage.getItem('recruitInterviews');
+      
+      console.log('Checking localStorage first');
+      console.log('Stored runs:', storedRuns);
+      console.log('Stored interviews:', storedInterviews);
+      
+      if (storedRuns || storedInterviews) {
+        // Use localStorage data if available
+        if (storedRuns) {
+          const parsedRuns = JSON.parse(storedRuns);
+          console.log('Using localStorage runs:', parsedRuns);
+          setRuns(parsedRuns);
+        }
+        if (storedInterviews) {
+          const parsedInterviews = JSON.parse(storedInterviews);
+          console.log('Using localStorage interviews:', parsedInterviews);
+          setInterviews(parsedInterviews);
+        }
+        setLoading(false);
+        return;
+      }
+      
+      // Fallback to API if no localStorage data
+      console.log('No localStorage data, trying API');
+      const response = await fetch('/api/recruit/dashboard');
+      const data = await response.json();
+      
+      if (data.success) {
+        console.log('API returned data:', data);
+        setRuns(data.runs || []);
+        setInterviews(data.interviews || []);
+      }
     } catch (error) {
       console.error("Error fetching dashboard data:", error);
     } finally {
@@ -101,8 +131,8 @@ export default function RecruitDashboardPage() {
               <p className="text-light-100 text-sm">No recruitment runs yet</p>
             ) : (
               <div className="space-y-3">
-                {runs.slice(0, 3).map((run) => (
-                  <div key={run.id} className="bg-dark-200 rounded-lg p-3">
+                {runs.slice(0, 3).map((run, index) => (
+                  <div key={run.id || `run-${index}`} className="bg-dark-200 rounded-lg p-3">
                     <div className="flex justify-between items-start">
                       <div>
                         <p className="text-sm font-medium text-light-100">
@@ -142,8 +172,8 @@ export default function RecruitDashboardPage() {
               <p className="text-light-100 text-sm">No interviews scheduled</p>
             ) : (
               <div className="space-y-3">
-                {interviews.slice(0, 3).map((interview) => (
-                  <div key={interview.id} className="bg-dark-200 rounded-lg p-3">
+                {interviews.slice(0, 3).map((interview, index) => (
+                  <div key={interview.id || `interview-${index}`} className="bg-dark-200 rounded-lg p-3">
                     <div className="flex justify-between items-start">
                       <div>
                         <p className="text-sm font-medium text-light-100">

@@ -54,9 +54,43 @@ export default function UploadResumesPage() {
         body: formData,
       });
 
+      // Check if response is ok and content type is JSON
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("API Error Response:", errorText);
+        toast.error(`Server error: ${response.status} - ${response.statusText}`);
+        return;
+      }
+
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        const errorText = await response.text();
+        console.error("Non-JSON Response:", errorText);
+        toast.error("Server returned invalid response format");
+        return;
+      }
+
       const result = await response.json();
+      console.log('API Response:', result);
 
       if (result.success) {
+        // Store data in localStorage for demo mode
+        if (result.runData) {
+          console.log('Storing runData:', result.runData);
+          const existingRuns = JSON.parse(localStorage.getItem('recruitRuns') || '[]');
+          existingRuns.unshift(result.runData);
+          localStorage.setItem('recruitRuns', JSON.stringify(existingRuns));
+          console.log('Stored runs:', existingRuns);
+        }
+        
+        if (result.candidates) {
+          console.log('Storing candidates:', result.candidates);
+          const existingCandidates = JSON.parse(localStorage.getItem('recruitCandidates') || '[]');
+          existingCandidates.push(...result.candidates);
+          localStorage.setItem('recruitCandidates', JSON.stringify(existingCandidates));
+          console.log('Stored candidates:', existingCandidates);
+        }
+        
         toast.success(`Successfully processed ${files.length} resumes. Run ID: ${result.runId}`);
         router.push("/recruit/dashboard");
       } else {
