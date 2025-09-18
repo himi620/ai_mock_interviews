@@ -4,12 +4,14 @@ import { db, isAdminReady } from "@/firebase/admin";
 export async function GET(request: NextRequest) {
   try {
     if (!isAdminReady()) {
-      // Return demo data when Firebase is not configured
+      // Try to get data from localStorage by checking if we're in a browser environment
+      // This is a server-side API, so we can't directly access localStorage
+      // Return empty data and let the client handle localStorage
       return NextResponse.json({
         success: true,
         runs: [],
         interviews: [],
-        message: "Demo mode - Firebase not configured"
+        message: "Demo mode - Firebase not configured, using localStorage data on client"
       });
     }
 

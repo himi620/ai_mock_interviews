@@ -106,6 +106,22 @@ interface CandidateInfo {
   summary: string;
   matchScore: number;
   recommended: "yes" | "no";
+  scoringBreakdown: {
+    skillsMatch: number;
+    experienceMatch: number;
+    roleAlignment: number;
+    educationMatch: number;
+  };
+  matchedSkills: string[];
+  missingSkills: string[];
+  experienceLevel: string;
+  detailedFeedback: {
+    strengths: string[];
+    weaknesses: string[];
+    specificGaps: string[];
+    recommendations: string[];
+    scoreExplanation: string;
+  };
 }
 
 interface RecruitRun {
@@ -157,4 +173,21 @@ interface ProcessResumeResponse {
   success: boolean;
   runId?: string;
   error?: string;
+}
+
+// Recruitment Statistics
+interface RecruitmentStats {
+  totalCandidates: number;
+  shortlistedCandidates: number;
+  interviewsCompleted: number;
+  interviewsScheduled: number;
+  totalRuns: number;
+  averageMatchScore: number;
+  lastUpdated: string;
+}
+
+interface StatsResponse {
+  success: boolean;
+  stats: RecruitmentStats;
+  message?: string;
 }

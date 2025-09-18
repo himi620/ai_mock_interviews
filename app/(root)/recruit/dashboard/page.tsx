@@ -32,14 +32,25 @@ interface RecruitInterview {
 export default function RecruitDashboardPage() {
   const [runs, setRuns] = useState<RecruitRun[]>([]);
   const [interviews, setInterviews] = useState<RecruitInterview[]>([]);
+  const [stats, setStats] = useState<RecruitmentStats | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchDashboardData();
+    
+    // Set up auto-refresh every 30 seconds
+    const interval = setInterval(() => {
+      fetchStatistics();
+    }, 30000);
+
+    return () => clearInterval(interval);
   }, []);
 
   const fetchDashboardData = async () => {
     try {
+      // Fetch statistics first
+      await fetchStatistics();
+      
       // Check localStorage first for demo mode
       const storedRuns = localStorage.getItem('recruitRuns');
       const storedInterviews = localStorage.getItem('recruitInterviews');
@@ -81,6 +92,59 @@ export default function RecruitDashboardPage() {
     }
   };
 
+  const fetchStatistics = async () => {
+    try {
+      // First try to get data from localStorage
+      const storedRuns = localStorage.getItem('recruitRuns');
+      const storedInterviews = localStorage.getItem('recruitInterviews');
+      
+      if (storedRuns || storedInterviews) {
+        const runs = storedRuns ? JSON.parse(storedRuns) : [];
+        const interviews = storedInterviews ? JSON.parse(storedInterviews) : [];
+        
+        // Calculate statistics from localStorage data
+        const totalCandidates = runs.reduce((sum: number, run: any) => sum + (run.total || 0), 0);
+        const shortlistedCandidates = runs.reduce((sum: number, run: any) => sum + (run.shortlisted?.length || 0), 0);
+        const interviewsCompleted = interviews.filter((interview: any) => interview.status === "completed").length;
+        const interviewsScheduled = interviews.filter((interview: any) => 
+          interview.status === "scheduled" || interview.status === "in_progress"
+        ).length;
+        const totalRuns = runs.length;
+        
+        // Calculate average match score for shortlisted candidates
+        const allShortlisted = runs.flatMap((run: any) => run.shortlisted || []);
+        const averageMatchScore = allShortlisted.length > 0 
+          ? allShortlisted.reduce((sum: number, candidate: any) => sum + (candidate.matchScore || 0), 0) / allShortlisted.length
+          : 0;
+        
+        const stats = {
+          totalCandidates,
+          shortlistedCandidates,
+          interviewsCompleted,
+          interviewsScheduled,
+          totalRuns,
+          averageMatchScore: Math.round(averageMatchScore * 100) / 100,
+          lastUpdated: new Date().toISOString()
+        };
+        
+        console.log('Statistics calculated from localStorage:', stats);
+        setStats(stats);
+        return;
+      }
+      
+      // Fallback to API if no localStorage data
+      const response = await fetch('/api/recruit/stats');
+      const data = await response.json();
+      
+      if (data.success) {
+        console.log('Statistics data from API:', data.stats);
+        setStats(data.stats);
+      }
+    } catch (error) {
+      console.error("Error fetching statistics:", error);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex-center min-h-[400px]">
@@ -95,13 +159,19 @@ export default function RecruitDashboardPage() {
   return (
     <div className="flex flex-col gap-4 sm:gap-6 lg:gap-8 px-4 sm:px-6 lg:px-8">
       <div className="text-center">
-        <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold mb-2">
-          Recruitment Dashboard
-        </h1>
-        <p className="text-sm sm:text-base lg:text-lg">
-          Manage your AI-powered recruitment pipeline
-        </p>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex-1">
+            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold mb-2">
+              Recruitment Dashboard
+            </h1>
+            <p className="text-sm sm:text-base lg:text-lg">
+              Manage your AI-powered recruitment pipeline
+            </p>
+          </div>
+        </div>
       </div>
+
+
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
         {/* Upload New Resumes */}
@@ -221,44 +291,76 @@ export default function RecruitDashboardPage() {
         </div>
       </div>
 
-      {/* Statistics */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-6">
-        <div className="card-border h-full">
-          <div className="card p-3 sm:p-4 lg:p-6 text-center h-full flex flex-col justify-center">
-            <div className="text-xl sm:text-2xl lg:text-3xl font-bold text-primary-200 mb-1 sm:mb-2">
-              {runs.reduce((sum, run) => sum + run.total, 0)}
+      {/* Statistics Cards */}
+      {stats && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+          {/* Total Candidates */}
+          <Link href="/recruit/candidates">
+            <div className="card-border cursor-pointer hover:bg-dark-200 transition-colors">
+              <div className="card p-4 sm:p-6 text-center">
+                <div className="text-3xl sm:text-4xl font-bold text-primary-200 mb-2">
+                  {stats.totalCandidates}
+                </div>
+                <div className="text-sm sm:text-base text-light-100 font-medium">
+                  Total Candidates
+                </div>
+                <div className="text-xs text-light-100 mt-1">
+                  All processed resumes
+                </div>
+                <div className="text-xs text-primary-200 mt-2">
+                  Click to view details →
+                </div>
+              </div>
             </div>
-            <div className="text-xs sm:text-sm text-light-100">Total Candidates</div>
+          </Link>
+
+          {/* Shortlisted Candidates */}
+          <div className="card-border">
+            <div className="card p-4 sm:p-6 text-center">
+              <div className="text-3xl sm:text-4xl font-bold text-success-100 mb-2">
+                {stats.shortlistedCandidates}
+              </div>
+              <div className="text-sm sm:text-base text-light-100 font-medium">
+                Shortlisted
+              </div>
+              <div className="text-xs text-light-100 mt-1">
+                Match score ≥ 70%
+              </div>
+            </div>
+          </div>
+
+          {/* Interviews Completed */}
+          <div className="card-border">
+            <div className="card p-4 sm:p-6 text-center">
+              <div className="text-3xl sm:text-4xl font-bold text-info-100 mb-2">
+                {stats.interviewsCompleted}
+              </div>
+              <div className="text-sm sm:text-base text-light-100 font-medium">
+                Interviews Completed
+              </div>
+              <div className="text-xs text-light-100 mt-1">
+                Finished interviews
+              </div>
+            </div>
+          </div>
+
+          {/* Scheduled Interviews */}
+          <div className="card-border">
+            <div className="card p-4 sm:p-6 text-center">
+              <div className="text-3xl sm:text-4xl font-bold text-warning-100 mb-2">
+                {stats.interviewsScheduled}
+              </div>
+              <div className="text-sm sm:text-base text-light-100 font-medium">
+                Scheduled
+              </div>
+              <div className="text-xs text-light-100 mt-1">
+                Upcoming interviews
+              </div>
+            </div>
           </div>
         </div>
-        
-        <div className="card-border h-full">
-          <div className="card p-3 sm:p-4 lg:p-6 text-center h-full flex flex-col justify-center">
-            <div className="text-xl sm:text-2xl lg:text-3xl font-bold text-success-100 mb-1 sm:mb-2">
-              {runs.reduce((sum, run) => sum + run.shortlisted.length, 0)}
-            </div>
-            <div className="text-xs sm:text-sm text-light-100">Shortlisted</div>
-          </div>
-        </div>
-        
-        <div className="card-border h-full">
-          <div className="card p-3 sm:p-4 lg:p-6 text-center h-full flex flex-col justify-center">
-            <div className="text-xl sm:text-2xl lg:text-3xl font-bold text-primary-200 mb-1 sm:mb-2">
-              {interviews.filter(i => i.status === "completed").length}
-            </div>
-            <div className="text-xs sm:text-sm text-light-100">Interviews Completed</div>
-          </div>
-        </div>
-        
-        <div className="card-border h-full">
-          <div className="card p-3 sm:p-4 lg:p-6 text-center h-full flex flex-col justify-center">
-            <div className="text-xl sm:text-2xl lg:text-3xl font-bold text-primary-200 mb-1 sm:mb-2">
-              {interviews.filter(i => i.status === "scheduled").length}
-            </div>
-            <div className="text-xs sm:text-sm text-light-100">Scheduled</div>
-          </div>
-        </div>
-      </div>
+      )}
+
     </div>
   );
 }

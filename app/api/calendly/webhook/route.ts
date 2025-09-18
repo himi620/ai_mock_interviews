@@ -2,6 +2,36 @@ import { NextRequest, NextResponse } from "next/server";
 import { db, isAdminReady } from "@/firebase/admin";
 import crypto from "crypto";
 
+// Update recruitment statistics in database
+async function updateRecruitmentStatistics() {
+  try {
+    // Fetch current statistics
+    const statsRef = db.collection("recruitment_stats").doc("current");
+    const statsDoc = await statsRef.get();
+    
+    if (statsDoc.exists) {
+      // Update existing statistics
+      await statsRef.update({
+        lastUpdated: new Date().toISOString()
+      });
+    } else {
+      // Create initial statistics document
+      await statsRef.set({
+        totalCandidates: 0,
+        shortlistedCandidates: 0,
+        interviewsCompleted: 0,
+        interviewsScheduled: 0,
+        totalRuns: 0,
+        averageMatchScore: 0,
+        lastUpdated: new Date().toISOString()
+      });
+    }
+  } catch (error) {
+    console.error("Error updating recruitment statistics:", error);
+    throw error;
+  }
+}
+
 // Verify Calendly webhook signature
 function verifyWebhookSignature(payload: string, signature: string, secret: string): boolean {
   const expectedSignature = crypto
@@ -117,6 +147,14 @@ export async function POST(request: NextRequest) {
       };
 
       await interviewRef.set(interviewData);
+
+      // Update recruitment statistics
+      try {
+        await updateRecruitmentStatistics();
+        console.log('Statistics updated after interview scheduling');
+      } catch (error) {
+        console.error('Error updating statistics after interview scheduling:', error);
+      }
 
       // Schedule interview runner
       await scheduleInterviewRunner(interviewId, scheduledAt);

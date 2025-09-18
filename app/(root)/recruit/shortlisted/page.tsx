@@ -31,6 +31,31 @@ interface RecruitRun {
   runStatus: "processing" | "completed" | "failed";
 }
 
+// Utility function to clean up localStorage data
+const cleanupLocalStorageData = () => {
+  try {
+    const storedRuns = localStorage.getItem('recruitRuns');
+    const storedCandidates = localStorage.getItem('recruitCandidates');
+    
+    if (storedRuns) {
+      const parsedRuns = JSON.parse(storedRuns);
+      const uniqueRuns = parsedRuns.filter((run: RecruitRun, index: number, self: RecruitRun[]) => 
+        index === self.findIndex((r: RecruitRun) => 
+          r.id === run.id || 
+          (r.createdAt === run.createdAt && r.jobDescription === run.jobDescription)
+        )
+      );
+      
+      if (uniqueRuns.length !== parsedRuns.length) {
+        localStorage.setItem('recruitRuns', JSON.stringify(uniqueRuns));
+        console.log('Cleaned up duplicate runs in localStorage');
+      }
+    }
+  } catch (error) {
+    console.error('Error cleaning up localStorage:', error);
+  }
+};
+
 export default function ShortlistedCandidatesPage() {
   const [candidates, setCandidates] = useState<ShortlistedCandidate[]>([]);
   const [runs, setRuns] = useState<RecruitRun[]>([]);
@@ -38,6 +63,8 @@ export default function ShortlistedCandidatesPage() {
   const [selectedRun, setSelectedRun] = useState<string>("all");
 
   useEffect(() => {
+    // Clean up localStorage data first
+    cleanupLocalStorageData();
     fetchShortlistedCandidates();
   }, []);
 
@@ -54,12 +81,31 @@ export default function ShortlistedCandidatesPage() {
         console.log('Parsed candidates:', parsedCandidates);
         console.log('Sample candidate structure:', parsedCandidates[0]);
         
-        setRuns(parsedRuns);
+        // Remove duplicate runs based on ID and creation date
+        const uniqueRuns = parsedRuns.filter((run: RecruitRun, index: number, self: RecruitRun[]) => 
+          index === self.findIndex((r: RecruitRun) => 
+            r.id === run.id || 
+            (r.createdAt === run.createdAt && r.jobDescription === run.jobDescription)
+          )
+        );
         
-        // Filter only shortlisted candidates (those with recommended: "yes")
-        const shortlistedCandidates = parsedCandidates.filter((candidate: any) => 
-          candidate.ai && candidate.ai.recommended === "yes"
-        ).map((candidate: any) => ({
+        console.log('Original runs count:', parsedRuns.length);
+        console.log('Unique runs count:', uniqueRuns.length);
+        console.log('Unique runs:', uniqueRuns);
+        
+        // Debug: Show duplicate runs if any
+        if (parsedRuns.length !== uniqueRuns.length) {
+          console.log('Found duplicate runs. Original runs:', parsedRuns);
+          console.log('Duplicate runs removed:', parsedRuns.length - uniqueRuns.length);
+        }
+        
+        setRuns(uniqueRuns);
+        
+        // Filter only shortlisted candidates (those with match score >= 70%)
+        const shortlistedCandidates = parsedCandidates.filter((candidate: any) => {
+          const matchScore = candidate.matchScore || candidate.ai?.matchScore || 0;
+          return matchScore >= 70;
+        }).map((candidate: any) => ({
           ...candidate,
           candidateName: candidate.candidateName || candidate.ai?.candidateName || 'Unknown Candidate',
           email: candidate.email || candidate.ai?.email || 'No email provided',
@@ -69,7 +115,16 @@ export default function ShortlistedCandidatesPage() {
         }));
         
         console.log('Shortlisted candidates:', shortlistedCandidates);
+        console.log('Runs data:', uniqueRuns);
+        console.log('Sample candidate runId:', shortlistedCandidates[0]?.runId);
+        console.log('Sample run id:', uniqueRuns[0]?.id);
         setCandidates(shortlistedCandidates);
+        
+        // Update localStorage with deduplicated runs
+        if (uniqueRuns.length !== parsedRuns.length) {
+          localStorage.setItem('recruitRuns', JSON.stringify(uniqueRuns));
+          console.log('Updated localStorage with deduplicated runs');
+        }
       }
     } catch (error) {
       console.error("Error fetching shortlisted candidates:", error);
@@ -82,7 +137,23 @@ export default function ShortlistedCandidatesPage() {
     ? candidates 
     : candidates.filter(candidate => {
         console.log('Filtering candidate:', candidate.runId, 'against selected run:', selectedRun);
-        return candidate.runId === selectedRun;
+        // Try exact match first, then try to find by run creation date if ID doesn't match
+        if (candidate.runId === selectedRun) {
+          return true;
+        }
+        
+        // Fallback: try to match by finding the run and checking if this candidate belongs to it
+        const run = runs.find(r => r.id === selectedRun);
+        if (run) {
+          // Check if this candidate was created around the same time as the run
+          const candidateDate = new Date(candidate.createdAt);
+          const runDate = new Date(run.createdAt);
+          const timeDiff = Math.abs(candidateDate.getTime() - runDate.getTime());
+          // If within 1 hour, consider it a match
+          return timeDiff < 3600000; // 1 hour in milliseconds
+        }
+        
+        return false;
       });
 
   const getRunById = (runId: string) => {
@@ -123,15 +194,28 @@ export default function ShortlistedCandidatesPage() {
                 className="bg-dark-200 text-light-100 px-3 py-2 rounded-md border border-input focus:outline-none focus:ring-2 focus:ring-primary-200 text-sm sm:text-base w-full sm:w-auto"
               >
                 <option key="all" value="all">All Runs</option>
-                {runs.map((run) => (
-                  <option key={run.id || `run-${run.createdAt}`} value={run.id}>
-                    {new Date(run.createdAt).toLocaleDateString()} - {run.total} candidates
+                {runs.map((run, index) => (
+                  <option key={run.id || `run-${run.createdAt}-${index}`} value={run.id}>
+                    {new Date(run.createdAt).toLocaleDateString()} - {run.shortlisted?.length || 0} shortlisted
                   </option>
                 ))}
               </select>
             </div>
-            <div className="text-xs sm:text-sm text-light-100 mt-2 sm:mt-0">
-              Showing {filteredCandidates.length} of {candidates.length} shortlisted candidates
+            <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 items-start sm:items-center">
+              <div className="text-xs sm:text-sm text-light-100">
+                Showing {filteredCandidates.length} of {candidates.length} shortlisted candidates
+              </div>
+              <Button
+                onClick={() => {
+                  cleanupLocalStorageData();
+                  fetchShortlistedCandidates();
+                }}
+                variant="outline"
+                size="sm"
+                className="text-xs"
+              >
+                Clean Duplicates
+              </Button>
             </div>
           </div>
         </div>
@@ -213,6 +297,83 @@ export default function ShortlistedCandidatesPage() {
                         )}
                       </div>
                     </div>
+
+                    {/* Scoring Breakdown */}
+                    {(candidate.ai?.scoringBreakdown || candidate.scoringBreakdown) && (
+                      <div>
+                        <h4 className="text-xs sm:text-sm font-medium text-light-100 mb-2">Score Breakdown</h4>
+                        <div className="space-y-2">
+                          {Object.entries(candidate.ai?.scoringBreakdown || candidate.scoringBreakdown || {}).map(([key, value]) => (
+                            <div key={key} className="flex justify-between items-center">
+                              <span className="text-xs text-light-100 capitalize">
+                                {key.replace(/([A-Z])/g, ' $1').trim()}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <div className="w-16 bg-dark-200 rounded-full h-2">
+                                  <div 
+                                    className="bg-primary-200 h-2 rounded-full transition-all duration-300"
+                                    style={{ width: `${value}%` }}
+                                  ></div>
+                                </div>
+                                <span className="text-xs text-light-100 w-8 text-right">{value}%</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Matched and Missing Skills */}
+                    {(candidate.ai?.matchedSkills || candidate.matchedSkills) && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <h4 className="text-xs sm:text-sm font-medium text-success-100 mb-1">Matched Skills</h4>
+                          <div className="flex flex-wrap gap-1">
+                            {(candidate.ai?.matchedSkills || candidate.matchedSkills || []).slice(0, 3).map((skill, index) => (
+                              <span
+                                key={index}
+                                className="px-2 py-1 bg-success-200 text-dark-100 text-xs rounded-full"
+                              >
+                                {skill}
+                              </span>
+                            ))}
+                            {(candidate.ai?.matchedSkills || candidate.matchedSkills || []).length > 3 && (
+                              <span className="px-2 py-1 bg-dark-200 text-light-100 text-xs rounded-full">
+                                +{(candidate.ai?.matchedSkills || candidate.matchedSkills || []).length - 3}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div>
+                          <h4 className="text-xs sm:text-sm font-medium text-error-100 mb-1">Missing Skills</h4>
+                          <div className="flex flex-wrap gap-1">
+                            {(candidate.ai?.missingSkills || candidate.missingSkills || []).slice(0, 3).map((skill, index) => (
+                              <span
+                                key={index}
+                                className="px-2 py-1 bg-error-200 text-dark-100 text-xs rounded-full"
+                              >
+                                {skill}
+                              </span>
+                            ))}
+                            {(candidate.ai?.missingSkills || candidate.missingSkills || []).length > 3 && (
+                              <span className="px-2 py-1 bg-dark-200 text-light-100 text-xs rounded-full">
+                                +{(candidate.ai?.missingSkills || candidate.missingSkills || []).length - 3}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Experience Level */}
+                    {(candidate.ai?.experienceLevel || candidate.experienceLevel) && (
+                      <div>
+                        <h4 className="text-xs sm:text-sm font-medium text-light-100 mb-1">Experience Level</h4>
+                        <span className="px-2 py-1 bg-primary-200 text-dark-100 text-xs rounded-full">
+                          {candidate.ai?.experienceLevel || candidate.experienceLevel}
+                        </span>
+                      </div>
+                    )}
 
                     <div className="pt-2 sm:pt-3 border-t border-dark-200">
                       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center text-xs text-light-100 gap-1 sm:gap-0">

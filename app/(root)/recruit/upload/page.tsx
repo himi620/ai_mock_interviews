@@ -77,8 +77,12 @@ export default function UploadResumesPage() {
         // Store data in localStorage for demo mode
         if (result.runData) {
           console.log('Storing runData:', result.runData);
+          const runDataWithId = {
+            ...result.runData,
+            id: result.runId
+          };
           const existingRuns = JSON.parse(localStorage.getItem('recruitRuns') || '[]');
-          existingRuns.unshift(result.runData);
+          existingRuns.unshift(runDataWithId);
           localStorage.setItem('recruitRuns', JSON.stringify(existingRuns));
           console.log('Stored runs:', existingRuns);
         }
