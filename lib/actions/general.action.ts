@@ -3,13 +3,17 @@
 import { generateObject } from "ai";
 import { google } from "@ai-sdk/google";
 
-import { db } from "@/firebase/admin";
+import { db, isAdminReady } from "@/firebase/admin";
 import { feedbackSchema } from "@/constants";
 
 export async function createFeedback(params: CreateFeedbackParams) {
   const { interviewId, userId, transcript, feedbackId } = params;
 
   try {
+    if (!isAdminReady()) {
+      console.warn("[feedback] Admin not configured; skipping save.");
+      return { success: false };
+    }
     const formattedTranscript = transcript
       .map(
         (sentence: { role: string; content: string }) =>
@@ -57,7 +61,17 @@ export async function createFeedback(params: CreateFeedbackParams) {
       feedbackRef = db.collection("feedback").doc();
     }
 
-    await feedbackRef.set(feedback);
+    try {
+      await feedbackRef.set(feedback);
+    } catch (err: any) {
+      const msg = String(err?.message || err);
+      const isCred = msg.includes('Getting metadata from plugin failed') || msg.includes('DECODER routines::unsupported');
+      if (isCred) {
+        console.warn("[feedback] Skipping Firestore write due to admin credential error.");
+        return { success: false };
+      }
+      throw err;
+    }
 
     return { success: true, feedbackId: feedbackRef.id };
   } catch (error) {
@@ -67,27 +81,41 @@ export async function createFeedback(params: CreateFeedbackParams) {
 }
 
 export async function getInterviewById(id: string): Promise<Interview | null> {
-  const interview = await db.collection("interviews").doc(id).get();
-
-  return interview.data() as Interview | null;
+  if (!isAdminReady()) return null;
+  try {
+    const interview = await db.collection("interviews").doc(id).get();
+    return interview.data() as Interview | null;
+  } catch (err: any) {
+    const msg = String(err?.message || err);
+    const isCred = msg.includes('Getting metadata from plugin failed') || msg.includes('DECODER routines::unsupported');
+    if (isCred) return null;
+    throw err;
+  }
 }
 
 export async function getFeedbackByInterviewId(
   params: GetFeedbackByInterviewIdParams
 ): Promise<Feedback | null> {
   const { interviewId, userId } = params;
+  if (!isAdminReady()) return null;
+  try {
+    const querySnapshot = await db
+      .collection("feedback")
+      .where("interviewId", "==", interviewId)
+      .where("userId", "==", userId)
+      .limit(1)
+      .get();
 
-  const querySnapshot = await db
-    .collection("feedback")
-    .where("interviewId", "==", interviewId)
-    .where("userId", "==", userId)
-    .limit(1)
-    .get();
+    if (querySnapshot.empty) return null;
 
-  if (querySnapshot.empty) return null;
-
-  const feedbackDoc = querySnapshot.docs[0];
-  return { id: feedbackDoc.id, ...feedbackDoc.data() } as Feedback;
+    const feedbackDoc = querySnapshot.docs[0];
+    return { id: feedbackDoc.id, ...feedbackDoc.data() } as Feedback;
+  } catch (err: any) {
+    const msg = String(err?.message || err);
+    const isCred = msg.includes('Getting metadata from plugin failed') || msg.includes('DECODER routines::unsupported');
+    if (isCred) return null;
+    throw err;
+  }
 }
 
 export async function getLatestInterviews(
@@ -95,31 +123,101 @@ export async function getLatestInterviews(
 ): Promise<Interview[] | null> {
   const { userId, limit = 20 } = params;
 
-  const interviews = await db
-    .collection("interviews")
-    .orderBy("createdAt", "desc")
-    .where("finalized", "==", true)
-    .where("userId", "!=", userId)
-    .limit(limit)
-    .get();
+  const toMs = (value: any) => {
+    if (!value) return 0;
+    if (typeof value?.toDate === "function") return value.toDate().getTime();
+    const t = Date.parse(value);
+    return Number.isNaN(t) ? 0 : t;
+  };
 
-  return interviews.docs.map((doc) => ({
-    id: doc.id,
-    ...doc.data(),
-  })) as Interview[];
+  try {
+    if (!isAdminReady()) return [];
+    // Avoid the Firestore inequality ("!=") on userId to prevent multi-field range issues.
+    const snapshot = await db
+      .collection("interviews")
+      .where("finalized", "==", true)
+      .orderBy("createdAt", "desc")
+      .limit(Math.max(limit * 2, limit))
+      .get();
+
+    const items = snapshot.docs
+      .map((doc) => ({ id: doc.id, ...doc.data() })) as Interview[];
+
+    const filtered = items.filter((it: any) => it.userId !== userId);
+    return filtered.slice(0, limit);
+  } catch (error: any) {
+    const msg = String(error?.message || error);
+    const isCred = msg.includes('Getting metadata from plugin failed') || msg.includes('DECODER routines::unsupported');
+    if (isCred) return [];
+    const isMissingIndex =
+      (error && error.code === 9) ||
+      (typeof error?.message === "string" &&
+        error.message.includes("FAILED_PRECONDITION"));
+
+    if (!isMissingIndex) throw error;
+
+    // Fallback: fetch without orderBy and sort/filter in-memory
+    const fallback = await db
+      .collection("interviews")
+      .where("finalized", "==", true)
+      .limit(Math.max(limit * 3, limit))
+      .get();
+
+    const items = (fallback.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    })) as Interview[]).sort((a: any, b: any) => toMs(b.createdAt) - toMs(a.createdAt));
+
+    const filtered = items.filter((it: any) => it.userId !== userId);
+    return filtered.slice(0, limit);
+  }
 }
 
 export async function getInterviewsByUserId(
   userId: string
 ): Promise<Interview[] | null> {
-  const interviews = await db
-    .collection("interviews")
-    .where("userId", "==", userId)
-    .orderBy("createdAt", "desc")
-    .get();
+  try {
+    if (!isAdminReady()) return [];
+    const interviews = await db
+      .collection("interviews")
+      .where("userId", "==", userId)
+      .orderBy("createdAt", "desc")
+      .get();
 
-  return interviews.docs.map((doc) => ({
-    id: doc.id,
-    ...doc.data(),
-  })) as Interview[];
+    return interviews.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    })) as Interview[];
+  } catch (error: any) {
+    const msg = String(error?.message || error);
+    const isCred = msg.includes('Getting metadata from plugin failed') || msg.includes('DECODER routines::unsupported');
+    if (isCred) return [];
+    const isMissingIndex =
+      (error && error.code === 9) ||
+      (typeof error?.message === "string" &&
+        error.message.includes("FAILED_PRECONDITION"));
+
+    if (!isMissingIndex) throw error;
+
+    // Fallback: fetch without orderBy and sort in-memory by createdAt desc
+    const fallback = await db
+      .collection("interviews")
+      .where("userId", "==", userId)
+      .get();
+
+    const items = fallback.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    })) as Interview[];
+
+    const toMs = (value: any) => {
+      if (!value) return 0;
+      if (typeof value?.toDate === "function") return value.toDate().getTime();
+      const t = Date.parse(value);
+      return Number.isNaN(t) ? 0 : t;
+    };
+
+    items.sort((a: any, b: any) => toMs(b.createdAt) - toMs(a.createdAt));
+    return items;
+  }
 }

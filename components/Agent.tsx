@@ -117,26 +117,120 @@ const Agent = ({
   const handleCall = async () => {
     setCallStatus(CallStatus.CONNECTING);
 
-    if (type === "generate") {
-      await vapi.start(process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID!, {
-        variableValues: {
-          username: userName,
-          userid: userId,
-        },
-      });
-    } else {
-      let formattedQuestions = "";
-      if (questions) {
-        formattedQuestions = questions
-          .map((question) => `- ${question}`)
-          .join("\n");
+    const formatErr = (err: unknown) => {
+      try {
+        if (err instanceof Error) {
+          return `${err.name}: ${err.message}\n${err.stack}`;
+        }
+        return JSON.stringify(err, Object.getOwnPropertyNames(err), 2);
+      } catch {
+        return String(err as unknown);
+      }
+    };
+
+    try {
+      const workflowId = process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID;
+      if (type === "generate") {
+        if (!workflowId) {
+          throw new Error("Missing NEXT_PUBLIC_VAPI_WORKFLOW_ID. Add it to your .env and restart.");
+        }
+        await vapi.start(
+          {
+            name: "WorkflowRunner",
+            voice: interviewer.voice,
+            model: {
+              provider: "vapi",
+              // Use the existing workflow in Vapi
+              workflowId,
+              model: "workflow", // required by type, ignored by provider:vapi
+            },
+          },
+          {
+            variableValues: {
+              username: userName,
+              userid: userId,
+            },
+          }
+        );
+      } else {
+        let formattedQuestions = "";
+        if (questions) {
+          formattedQuestions = questions
+            .map((question) => `- ${question}`)
+            .join("\\n");
+        }
+
+        await vapi.start(interviewer, {
+          variableValues: {
+            questions: formattedQuestions,
+          },
+        });
+      }
+    } catch (error) {
+      // Log detailed error information to help diagnose opaque errors (like `{}`)
+      console.error("vapi.start failed:", error);
+      console.error("vapi.start failure (stringified):", formatErr(error));
+
+      // Try a safe fallback when the provided ID refers to a non-existent assistant.
+      const extractMessage = (err: unknown) => {
+        if (err instanceof Error) return err.message;
+        try {
+          const e = err as unknown as Record<string, unknown> | null;
+          if (e && typeof e === "object") {
+            const potentialError = e["error"];
+            if (potentialError && typeof potentialError === "object") {
+              const msgVal = (potentialError as Record<string, unknown>)["message"];
+              if (typeof msgVal === "string") return msgVal;
+            }
+
+            const directMessage = e["message"];
+            if (typeof directMessage === "string") return directMessage;
+          }
+          return JSON.stringify(e);
+        } catch {
+          return String(err as unknown);
+        }
+      };
+
+      const msg = extractMessage(error || "");
+      if (String(msg || '').includes('Missing NEXT_PUBLIC_VAPI_WEB_TOKEN') || String(msg || '').includes('NEXT_PUBLIC_VAPI_WORKFLOW_ID')) {
+        try { alert(String(msg)); } catch {}
+        setCallStatus(CallStatus.INACTIVE);
+        return;
       }
 
-      await vapi.start(interviewer, {
-        variableValues: {
-          questions: formattedQuestions,
-        },
-      });
+      // If we attempted to start using an assistant id (env var) that doesn't exist,
+      // fallback to creating/starting a local assistant using the `interviewer` DTO.
+      if (
+        type === "generate" &&
+        msg &&
+        (msg.includes("assistantId") || msg.includes("Couldn't Get Assistant") || msg.includes("Does Not Exist") || msg.includes("Bad Request"))
+      ) {
+        console.warn("Assistant not found for provided ID; falling back to local interviewer assistant...");
+        try {
+          await vapi.start(interviewer, {
+            variableValues: {
+              username: userName,
+              userid: userId,
+            },
+          });
+
+          // If fallback succeeded, do not show the generic alert below.
+          return;
+        } catch (fallbackErr) {
+          console.error("Fallback vapi.start(interviewer) failed:", fallbackErr);
+          console.error("Fallback failure (stringified):", formatErr(fallbackErr));
+        }
+      }
+
+      // Reset UI state so the call button isn't stuck on CONNECTING
+      setCallStatus(CallStatus.INACTIVE);
+
+      try {
+        alert("Failed to start call. See console for details.");
+      } catch {
+        // ignore if alert is not available
+      }
     }
   };
 
